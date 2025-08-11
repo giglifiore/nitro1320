@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Nitro 1320 - Prototipo corregido con física realista</title>
+<style>
+  body {
+    margin:0; padding:0; background:#071025; color:#e6eef8;
+    font-family: Inter, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    display:flex; justify-content:center; align-items:center; height:100vh;
+  }
+  .app {
+    width: 980px; background:#0f1724; border-radius:12px; padding:14px;
+    box-shadow: 0 8px 30px rgba(2,6,23,0.6);
+    display:flex; gap:12px;
+  }
+  canvas {
+    background: linear-gradient(#0d1630, #081226);
+    border-radius: 10px; border: 1px solid rgba(255,255,255,0.03);
+  }
+  .panel {
+    width: 320px; padding: 12px; background: rgba(255,255,255,0.02);
+    border-radius: 8px;
+  }
+  button {
+    background: #122033; border: 1px solid rgba(255,255,255,0.03);
+    color: #e6eef8; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    margin-right: 8px;
+  }
+  .small {
+    font-size: 13px; color: #98a0b3;
+  }
+  .stat {
+    display:flex; justify-content:space-between; padding:6px 0;
+    border-bottom:1px dashed rgba(255,255,255,0.03);
+  }
+  .bar {
+    height: 12px; background: rgba(255,255,255,0.05);
+    border-radius: 6px; overflow: hidden;
+    margin-top: 6px;
+  }
+  .bar > i {
+    display:block; height: 100%;
+    background: linear-gradient(90deg,#ffcc00,#ff7a00);
+    width: 0%;
+  }
+  
+</style>
+</head>
+<body>
+
+<div class="app" style="display: flex; gap: 12px; height: 800px; background: #071025;">
+
+  <!-- Columna izquierda: pista -->
+  <div style="width: 100px; flex-shrink: 0;">
+    <canvas id="track" width="100" height="800" style="display: block;"></canvas>
+  </div>
+
+  <!-- Columna central: juego + tacómetro -->
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: space-between; height: 800px; flex-shrink: 0; width: 800px;">
+    <canvas id="gameCanvas" width="800" height="580" style="border-radius: 12px; box-shadow: 0 8px 30px rgba(2,6,23,0.6); display: block;"></canvas>
+   
+	 <div style="display: flex; justify-content: center; gap: 20px; margin-top: 10px;">
+    <canvas id="tacometroNitro" width="200" height="200" style="background: #111; border-radius: 50%; box-shadow: 0 0 15px #ff0000;"></canvas>
+    <canvas id="tacometro" width="200" height="200" style="background: #111; border-radius: 50%; box-shadow: 0 0 15px #ff0000;"></canvas>
+    <canvas id="tacometroVel" width="200" height="200" style="background: #111; border-radius: 50%; box-shadow: 0 0 15px #ff0000;"></canvas>
+  </div>
+  </div>
+
+  <!-- Columna derecha: panel -->
+  <div class="panel" style="width: 300px; flex-shrink: 0; padding-left: 10px; color: #e6eef8; overflow-y: auto; max-height: 800px;">
+    <h2>Nitro1320 — Prototipo mini</h2>
+    <div class="small">Controles: <kbd>A</kbd> subir marcha • <kbd>Z</kbd> bajar • <kbd>Espacio</kbd> nitro • <kbd>↑</kbd> acelerar</div>
+    <div style="margin-top:10px">
+      <div class="stat"><div>Velocidad</div><div id="speedLabel">0.0 km/h</div></div>
+      <div class="stat"><div>Marcha</div><div id="gearLabel">N</div></div>
+      <div class="stat"><div>RPM</div><div id="rpmLabel">0</div></div>
+      <div class="stat"><div>Velocidad máxima</div><div id="maxSpeedLabel">0.0 km/h</div></div>
+      <div class="stat"><div>Distancia</div><div id="distLabel">0.0 ft</div></div>
+      <div>RPM</div>
+      <div class="bar"><i id="rpmBar"></i></div>
+      <div style="margin-top:10px" class="small">Nitro</div>
+      <div class="bar"><i id="nitroBar" style="width:100%"></i></div>
+      <div style="margin-top:12px" class="controls">
+        <button id="startBtn">Iniciar carrera</button>
+        <button id="resetBtn">Reiniciar</button>
+      </div>
+      <div style="margin-top:10px" class="small">Estado de cambio: <span id="shiftState">-</span></div>
+      <div style="margin-top:6px" class="small">Mejor tiempo: <strong id="bestTime">--</strong></div>
+      <div class="small" style="margin-top:12px" id="timer">00.000 s</div>
+	  <div id="potencia" style="font-size: 24px; font-weight: bold; margin: 20px 0;">Potencia total: 100 HP</div>
+
+    </div>
+  </div>
+
+</div>
+<script>
+window.addEventListener("load", () => {
+    const pieza = JSON.parse(localStorage.getItem("piezaMotorSeleccionada"));
+    if (pieza) {
+        console.log("Pieza seleccionada:", pieza.nombre);
+        console.log(`Extra potencia: ${pieza.potencia} HP`);
+        console.log(`Extra torque: ${pieza.torque} Nm`);
+        // Aquí sumas la potencia y torque al motor del juego
+        motor.hp += pieza.potencia;
+        motor.torque += pieza.torque;
+    }
+});
+</script>
+
+
+<script>
+const canvas = document.getElementById('track');
+const ctx = canvas.getContext('2d');
+const speedLabel = document.getElementById('speedLabel');
+const gearLabel = document.getElementById('gearLabel');
+const rpmLabel = document.getElementById('rpmLabel');
+const distLabel = document.getElementById('distLabel');
+const rpmBar = document.getElementById('rpmBar');
+const nitroBar = document.getElementById('nitroBar');
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const shiftState = document.getElementById('shiftState');
+const timerEl = document.getElementById('timer');
+const bestTimeEl = document.getElementById('bestTime');
+const tacometroCanvas = document.getElementById("tacometro");
+const ctxNitro = document.getElementById("tacometroNitro").getContext("2d");
+const ctxVel = document.getElementById("tacometroVel").getContext("2d");
+const tacCtx = tacometroCanvas.getContext("2d");
+const gameCanvas = document.getElementById("gameCanvas");
+const gameCtx = gameCanvas.getContext("2d");
+
+// =========================
+// CARGA DE IMÁGENES
+// =========================
+const gameTrackImg = new Image();
+gameTrackImg.src = "pista.png";
+
+let playerCarImg = new Image();
+playerCarImg.src = "miCivic.png";
+
+let cpuCarImg = new Image();
+cpuCarImg.src = "rival.png";
+
+
+let running = false;
+let lastTime = 0;
+let elapsed = 0;
+let bestTime = null;
+let keys = {};
+let countdown = 3; // segundos del semáforo
+let countdownRunning = false;
+let playerFinished = false;
+let cpuFinished = false;
+let playerFinishTime = 0;
+let cpuFinishTime = 0;
+let maxSpeed = 0;
+let playerDistance = 0; // Distancia del jugador
+let cpuDistance = 0;    // Distancia del CPU
+let bgOffset = 0;   // para la pista en el canvas pequeño o track
+let bgOffsetX = 0;
+
+
+// Parámetros físicos
+const quarterMile = 1320; // pies
+const footToMeter = 0.3048;
+const trackLength = quarterMile * footToMeter;
+
+// Parámetros físicos reales para resistencia y masa
+const rho = 1.225;  // kg/m³, aire
+const Cd = 0.30;    // coef arrastre aerodinámico
+const A = 2.0;      // área frontal m² aprox
+const Cr = 0.015;   // coef resistencia rodadura
+const m = 1150;     // masa kg
+const g = 9.81;     // gravedad m/s²
+
+const linePositions = [];
+const lineSpacing = 80; // distancia entre líneas
+const lineWidthBase = 4;
+const lineLengthBase = 30;
+
+// Define la zona visible donde quieres que estén las líneas:
+// - bottomY: un poco más arriba del borde inferior, por ejemplo 85% del alto
+// - trackHeight: la distancia desde bottomY hacia arriba donde se dibujan las líneas
+const bottomY = canvas.height * 0.55;  
+const trackHeight = canvas.height * 0.55; 
+
+const centerX = gameCanvas.width / 2;
+
+if (linePositions.length === 0) {
+  // Inicializar posiciones desde abajo hacia arriba dentro del rango visible
+  for (let y = bottomY; y > bottomY - trackHeight; y -= lineSpacing) {
+    linePositions.push(y);
+  }
+}
+
+function drawMovingLines(speed) {
+  // El límite superior donde las líneas se “resetean” para reaparecer abajo
+  const maxDrawHeight = bottomY - (trackHeight * 0.5);
+
+  gameCtx.strokeStyle = 'white';
+
+  for (let i = 0; i < linePositions.length; i++) {
+    let y = linePositions[i];
+
+    if (y < maxDrawHeight) {
+      linePositions[i] = y + trackHeight;
+      continue;
+    }
+
+    // Normalizar desde abajo (0) hacia arriba (1)
+    let normY = (bottomY - y) / (bottomY - maxDrawHeight);
+
+    // Grosor y longitud inversos a la altura (más gruesas abajo)
+    let lineWidth = 1.2 + (6 - 1.5) * (1 - normY);
+    let lineLength = 9 + (30 - 9) * (1 - normY);
+
+    // Offset horizontal para convergencia
+    let offsetX = (1 - normY) * 30;
+
+    gameCtx.lineWidth = lineWidth;
+
+    // Dibuja dos líneas (izquierda y derecha)
+    gameCtx.beginPath();
+    gameCtx.moveTo(centerX - offsetX, y);
+    gameCtx.lineTo(centerX - offsetX, y - lineLength);
+    gameCtx.stroke();
+
+    gameCtx.beginPath();
+    gameCtx.moveTo(centerX + offsetX, y);
+    gameCtx.lineTo(centerX + offsetX, y - lineLength);
+    gameCtx.stroke();
+
+    // Mueve las líneas hacia arriba
+    y -= speed * 120 * (1 / 60);
+
+    if (y < maxDrawHeight) {
+      y = y + trackHeight + lineLength;
+    }
+
+    linePositions[i] = y;
+  }
+}
+
+const car = {
+  x: 50, y: 200, w: 60, h: 30,
+  speed: 0,
+  accelInput: 0,
+  rpm: 900,
+  nitro: 100,
+  nitroActive: false,
+  nitroTime: 0,
+  justShifted: false,
+  shiftMsg: '-'
+};
+
+/* Datos reales aproximados del Honda Civic Type R 1998 (EK9):
+Motor: 1.6L DOHC VTEC 4 cilindros
+Potencia: aprox 185 hp (~138 kW) a 8,200 rpm
+Torque máximo: ~160 Nm
+Redline: alrededor de 8,500 rpm
+Peso: 1,150 kg aprox
+Relación de transmisión (engranajes): 5 velocidades manuales
+Aceleración 0-100 km/h: ~6.7 segundos
+Velocidad máxima: ~225 km/h
+*/
+
+const cpu = { dist: 0, progress: 0, timeToFinish: Infinity };
+
+// Configuración específica para el Civic 98
+const civicConfig = {
+  idle: 900,
+  redline: 8500,
+  gears: [0, 3.583, 2.045, 1.322, 1.00, 0.753], // 5 marchas + neutro
+  finalDrive: 4.785,
+  tireCircumference: 0.59 * Math.PI, // en metros (diámetro rueda promedio Civic 98)
+  vtecRPM: 6000,             // RPM donde entra el VTEC
+  vtecTorqueMultiplier: 1.15 // aumento de torque en VTEC (~15%)
+};
+
+function calcMaxSpeedPerGear(rpmMax, gearRatios, finalDrive, tireCircumference) {
+  const maxSpeeds = [];
+  for (let i = 0; i < gearRatios.length; i++) {
+    if (gearRatios[i] === 0) {
+      maxSpeeds.push(0);
+    } else {
+      // velocidad máxima en m/s para esta marcha
+      const v = (rpmMax * tireCircumference) / (gearRatios[i] * finalDrive * 60);
+      maxSpeeds.push(v);
+    }
+  }
+  return maxSpeeds;
+}
+
+const maxSpeedsPerGear = calcMaxSpeedPerGear(
+  civicConfig.redline,
+  civicConfig.gears,
+  civicConfig.finalDrive,
+  civicConfig.tireCircumference
+);
+
+let currentGear = 0;
+let distance = 0;
+
+// Curva simple de torque en Nm según RPM
+function torqueAtRPM(rpm) {
+  if (rpm < 1000) return 50;
+  if (rpm < 5000) return 160 * (rpm / 5000);
+  if (rpm < 7000) return 160;
+  if (rpm <= 8500) return 160 * (1 - (rpm - 7000) / 1500 * 0.5);
+  return 80;
+}
+
+
+let gameTrackLoaded = false;
+gameTrackImg.onload = () => {
+  gameTrackLoaded = true;
+  // Solo arrancar el loop cuando la imagen esté lista
+  requestAnimationFrame(gameLoop);
+}
+
+
+
+function updatePhysics(dt, car, config) {
+  const throttle = car.accelInput;
+  const rpmIdle = config.idle;
+  const rpmMax = config.redline;
+
+  if (!running) {
+    car.speed = 0;
+    if (throttle > 0) {
+      car.rpm += 3000 * dt;
+      if (car.rpm > rpmMax) car.rpm = rpmMax;
+    } else {
+      car.rpm -= 1500 * dt;
+      if (car.rpm < rpmIdle) car.rpm = rpmIdle;
+    }
+    return;
+  }
+
+  if (currentGear === 0) {
+    car.rpm = rpmIdle;
+  } else {
+    car.rpm = (car.speed * config.gears[currentGear] * config.finalDrive * 60) / config.tireCircumference;
+    if (car.rpm > rpmMax) car.rpm = rpmMax;
+  }
+
+  let torque = throttle > 0 ? torqueAtRPM(car.rpm) : 0;
+
+  if (car.rpm >= config.vtecRPM) {
+    torque *= config.vtecTorqueMultiplier;
+  }
+
+  const v = car.speed; // velocidad en m/s
+  const omega = (car.rpm * 2 * Math.PI) / 60; // rad/s
+  const power = torque * omega; // W
+
+  let Fmotor = 0;
+  if (v > 1) {
+    Fmotor = power / v;
+  } else if (currentGear > 0) {
+    const wheelRadius = config.tireCircumference / (2 * Math.PI);
+    Fmotor = (torque * config.gears[currentGear] * config.finalDrive) / wheelRadius;
+  }
+
+  const Fdrag = 0.5 * rho * Cd * A * v * v;
+  const Froll = Cr * m * g;
+  let Fnet = Fmotor - Fdrag - Froll;
+
+  // Nitro
+  if (car.nitroActive && car.nitro > 0) {
+    Fnet *= 1.9;
+    car.nitro -= 20 * dt;
+    car.nitroTime += dt;
+  }
+  if (car.nitro < 0) car.nitro = 0;
+
+  let accel = Fnet / m;
+
+  car.speed += accel * dt;
+
+// Limitar velocidad según marcha actual
+if (currentGear > 0) {
+  const maxSpeedThisGear = maxSpeedsPerGear[currentGear];
+  if (car.speed > maxSpeedThisGear) {
+    car.speed = maxSpeedThisGear;
+  }
+}
+
+if (car.speed > maxSpeed) maxSpeed = car.speed;
+if (car.speed < 0) car.speed = 0;
+
+  distance += car.speed * dt;
+  
+	playerDistance = distance;
+	cpuDistance = cpu.dist;
+
+  // Meta jugador
+  if (!playerFinished && distance >= trackLength) {
+    playerFinished = true;
+    running = false;
+    playerFinishTime = elapsed;
+    if (!bestTime || elapsed < bestTime) bestTime = elapsed;
+    startBtn.disabled = false;
+    shiftState.textContent = '¡Meta alcanzada!';
+  }
+
+  // CPU update
+  if (running) {
+    if (!isFinite(cpu.timeToFinish)) cpu.timeToFinish = 28 + Math.random() * 12;
+    cpu.progress = Math.min(1, elapsed / cpu.timeToFinish);
+    cpu.dist = cpu.progress * trackLength;
+  }
+
+  if (!cpuFinished && cpu.dist >= trackLength) {
+    cpuFinished = true;
+    cpuFinishTime = elapsed;
+  }
+}
+
+
+
+// Variables globales para suavizado de posición y escala CPU
+let cpuYOffset = 0; // variable global para animar posición vertical
+
+function drawGameCanvas(){
+  if (!gameTrackLoaded) return;
+
+  gameCtx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+  gameCtx.drawImage(gameTrackImg, 0, 0, gameCanvas.width, gameCanvas.height);
+  
+  // Luego dibuja las líneas móviles sobre la imagen:
+  drawMovingLines(car.speed);
+
+  // Posiciones base (centradas)
+  const playerX = gameCanvas.width * 0.0;
+  const playerY = gameCanvas.height / 2 + 10; // fijo
+  
+  // Diferencia de distancia
+  let distDiff = cpu.dist - distance;
+
+  // Ajusta cpuYOffsetTarget (mueve verticalmente según avance CPU)
+  const maxYOffset = 80;
+  let cpuYOffsetTarget = distDiff * 1;
+  if(cpuYOffsetTarget > maxYOffset) cpuYOffsetTarget = maxYOffset;
+  //if(cpuYOffsetTarget < 0) cpuYOffsetTarget = 0;
+
+  // Interpolación para suavizar movimiento vertical
+  cpuYOffset += (cpuYOffsetTarget - cpuYOffset) * 0.15;
+
+  // Desplazamiento horizontal proporcional al vertical
+  const cpuXOffset = cpuYOffset * 1; // Ajusta 0.6 para que se mueva más o menos a la izquierda
+
+  // Escala según distancia (más lejos = más pequeño)
+  let cpuScale = 1 - (cpuYOffset / maxYOffset) * 1.7; 
+  if(cpuScale < 0.1) cpuScale = 0.1;
+
+  // Dibuja player (fijo)
+  gameCtx.drawImage(playerCarImg, playerX, playerY, 300, 150);
+
+  // Dibuja CPU con desplazamiento y escala
+  gameCtx.drawImage(cpuCarImg, 
+    gameCanvas.width * 0.6 - cpuXOffset, // mueve a la izquierda según cpuXOffset
+    playerY - cpuYOffset, 
+    300 * cpuScale, 
+    150 * cpuScale
+  );
+  drawMovingLines(car.speed);
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#0b1220';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#1a2436';
+  ctx.fillRect(80, 40, 120, 520); //posicion de la pista
+  const finishX = 560;
+  ctx.fillStyle='#fff';
+  for(let i=0;i<20;i++){
+    ctx.fillRect(finishX + (i%2===0?0:8),80 + i*6,4,4);
+  }
+  // Posición horizontal según progreso en la pista
+const cpuX = 40 + Math.min(520, (cpu.dist / trackLength) * 520);
+const playerX = 40 + Math.min(530, (distance / trackLength) * 530);
+
+// Posiciones verticales fijas (carriles)
+const cpuY = 64;     // carril superior para CPU
+const playerY = 160; // carril inferior para el jugador
+
+// CPU
+ctx.fillStyle = '#b33';
+ctx.fillRect(cpuX, cpuY, 30, 50);
+ctx.fillStyle = '#fff';
+ctx.fillText('CPU', cpuX + 5, cpuY - 5);
+
+// Player
+ctx.fillStyle = '#2fb4ff';
+ctx.fillRect(playerX, playerY, 30, 50);
+ctx.fillStyle = '#001';
+ctx.fillText('YOU', playerX + 5, playerY - 5);
+  if(countdownRunning){
+    drawCountdown();
+  }
+}
+
+function drawTrack() {
+    ctx.fillStyle = "gray";
+    ctx.fillRect(0, 0, 100, canvas.height); // Pista
+    ctx.fillStyle = "white";
+
+    // Línea discontinua central
+    for (let y = 0; y < canvas.height; y += 40) {
+        ctx.fillRect(45, y, 5, 20);
+    }
+}
+
+function drawCars() {
+    // Auto del jugador
+    let playerY = canvas.height - 60 - (playerDistance / trackLength) * (canvas.height - 60);
+    ctx.fillStyle = "blue";
+    ctx.fillRect(10, playerY, 30, 50);
+
+    // Auto CPU
+    let cpuY = canvas.height - 60 - (cpuDistance / trackLength) * (canvas.height - 60);
+    ctx.fillStyle = "red";
+    ctx.fillRect(60, cpuY, 30, 50);
+}
+
+// DIBUJO
+function drawScene() {
+    let vtecActive = car.rpm >= 6000;
+
+    if (vtecActive) {
+        ctx.save();
+        ctx.translate(Math.random() * 4 - 2, Math.random() * 4 - 2); // vibración
+        ctx.filter = "blur(1px)"; // desenfoque
+    }
+
+    bgOffset += car.speed * 0.05;
+    if (bgOffset > trackImg.height) bgOffset = 0;
+
+    ctx.drawImage(trackImg, 0, -bgOffset, canvas.width, trackImg.height);
+    ctx.drawImage(trackImg, 0, -bgOffset + trackImg.height, canvas.width, trackImg.height);
+
+    const playerX = canvas.width / 2 - 50;
+    const playerY = canvas.height - 150;
+    ctx.drawImage(playerCarImg, playerX, playerY, 100, 150);
+
+    let distDiff = cpu.dist - distance;
+    let scale = Math.max(0.4, 1 - distDiff / 200);
+    let rivalY = playerY - distDiff * 2;
+    ctx.drawImage(cpuCarImg, canvas.width / 2 - (50 * scale), rivalY, 100 * scale, 150 * scale);
+
+    if (vtecActive) ctx.restore();
+}
+
+function updateUI() {
+  speedLabel.textContent = (car.speed * 3.6).toFixed(1) + ' km/h';
+  gearLabel.textContent = currentGear === 0 ? 'N' : currentGear;
+  rpmLabel.textContent = Math.round(car.rpm);
+  distLabel.textContent = (distance / footToMeter).toFixed(1) + ' ft';
+  rpmBar.style.width = Math.min(100, (car.rpm / redline) * 100) + '%';
+  nitroBar.style.width = Math.max(0, car.nitro) + '%';
+  shiftState.textContent = car.justShifted ? car.shiftMsg : '-';
+  timerEl.textContent = elapsed > 0 ? elapsed.toFixed(3) + ' s' : '00.000 s';
+  if (bestTime) bestTimeEl.textContent = bestTime.toFixed(3) + ' s';
+  
+  const maxSpeedLabel = document.getElementById('maxSpeedLabel');
+  maxSpeedLabel.textContent = (maxSpeed * 3.6).toFixed(1) + ' km/h';
+}
+
+function reset() {
+  running = false;
+  elapsed = 0;
+  distance = 0;
+  car.speed = 0;
+  car.rpm = civicConfig.idle;
+  currentGear = 0;
+  car.nitro = 100;
+  car.nitroActive = false;
+  car.nitroTime = 0;
+  cpu.dist = 0;
+  cpu.progress = 0;
+  cpu.timeToFinish = Infinity;
+  startBtn.disabled = false;
+  playerFinished = false;
+  cpuFinished = false;
+  playerFinishTime = 0;
+  cpuFinishTime = 0;
+  shiftState.textContent = '-';
+  playerDistance = 0;
+  cpuDistance = 0;
+
+}
+
+function startRace(){
+  if(running) return;
+  countdown = 3;
+  countdownRunning = true;
+  startBtn.disabled = true;
+  car.nitroActive = false;
+  elapsed = 0;
+  distance = 0;
+  car.speed = 0;
+  car.rpm = civicConfig.idle;
+  currentGear = 0;
+  car.nitro = 100;
+  playerFinished = false;
+  cpuFinished = false;
+  playerFinishTime = 0;
+  cpuFinishTime = 0;
+  shiftState.textContent = '-';
+
+  const interval = setInterval(() => {
+    countdown--;
+    if(countdown <= 0){
+      countdownRunning = false;
+      running = true;
+      clearInterval(interval);
+    }
+  }, 1000);
+}
+
+startBtn.addEventListener('click', startRace);
+resetBtn.addEventListener('click', reset);
+
+window.addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'ArrowUp') car.accelInput = 1;
+  if (e.key === 'a' || e.key === 'A') shiftUp();
+  if (e.key === 'z' || e.key === 'Z') shiftDown();
+  if (e.code === 'Space') activateNitro();
+});
+
+window.addEventListener('keyup', (e) => {
+  keys[e.code] = false;
+  if (e.code === 'ArrowUp') car.accelInput = 0;
+  if (e.code === 'Space') car.nitroActive = false;
+});
+
+function shiftUp() {
+  if (currentGear < civicConfig.gears.length - 1) {
+    const okShift = car.rpm >= 4200 && car.rpm <= 7200;
+    currentGear++;
+    car.justShifted = true;
+    if (okShift) {
+      car.shiftMsg = 'Perfect shift! +boost';
+      car.speed *= 1.05;
+    } else {
+      car.shiftMsg = 'Bad shift - penalty';
+      car.speed *= 0.9;
+    }
+    setTimeout(() => {
+      car.justShifted = false;
+      car.shiftMsg = '-';
+    }, 600);
+  }
+}
+
+function shiftDown() {
+  if (currentGear > 0) {
+    currentGear--;
+    car.shiftMsg = 'Downshift';
+    car.justShifted = true;
+    setTimeout(() => {
+      car.justShifted = false;
+      car.shiftMsg = '-';
+    }, 400);
+  }
+}
+
+function activateNitro() {
+  if (car.nitro > 5) {
+    car.nitroActive = true;
+  }
+}
+
+function gameLoop(ts){
+  if(!lastTime) lastTime = ts; 
+  const dtMs = ts - lastTime; 
+  lastTime = ts; 
+  const dt = dtMs/1000;
+
+  if(running){
+    elapsed += dt;
+  }
+
+  updatePhysics(dt, car, civicConfig);
+  //draw(); 
+  drawTrack();
+  drawCars();
+  drawGameCanvas(); // Dibujo en gameCanvas
+  updateUI();
+  dibujarTacometro(car.rpm);
+  let velocidadTacometro = car.speed * 3.6;
+  updateTacometros(car.nitro, velocidadTacometro);
+
+  requestAnimationFrame(gameLoop);
+}
+
+function drawCountdown(){
+  if(countdownRunning){
+    ctx.font = 'bold 72px Arial';
+    ctx.fillStyle = countdown === 1 ? 'green' : countdown === 2 ? 'yellow' : 'red';
+    ctx.textAlign = 'center';
+    ctx.fillText(countdown, canvas.width/2, canvas.height/2);
+  }
+}
+
+function dibujarTacometro(rpm) {
+    const maxRPM = redline;
+    const centroX = tacometroCanvas.width / 2;
+    const centroY = tacometroCanvas.height / 2;
+    const radio = 80;
+
+    tacCtx.clearRect(0, 0, tacometroCanvas.width, tacometroCanvas.height);
+
+    // Fondo
+    tacCtx.beginPath();
+    tacCtx.arc(centroX, centroY, radio, 0, 2 * Math.PI);
+    tacCtx.fillStyle = "#111";
+    tacCtx.fill();
+
+    // Escala
+    for (let i = 0; i <= maxRPM; i += 1000) {
+        const ang = (Math.PI * 0.75) + (i / maxRPM) * (Math.PI * 1.5);
+        const x1 = centroX + Math.cos(ang) * (radio - 10);
+        const y1 = centroY + Math.sin(ang) * (radio - 10);
+        const x2 = centroX + Math.cos(ang) * (radio - 2);
+        const y2 = centroY + Math.sin(ang) * (radio - 2);
+
+        tacCtx.beginPath();
+        tacCtx.moveTo(x1, y1);
+        tacCtx.lineTo(x2, y2);
+        tacCtx.strokeStyle = "#fff";
+        tacCtx.lineWidth = 2;
+        tacCtx.stroke();
+
+        // Números
+        const numX = centroX + Math.cos(ang) * (radio - 25);
+        const numY = centroY + Math.sin(ang) * (radio - 25) + 4;
+        tacCtx.fillStyle = "#fff";
+        tacCtx.font = "14px Arial";
+        tacCtx.textAlign = "center";
+        tacCtx.fillText(i / 1000, numX, numY);
+    }
+
+    // Zona verde (5000–5500)
+    const angVerdeInicio = (Math.PI * 0.75) + (5000 / maxRPM) * (Math.PI * 1.5);
+    const angVerdeFin = (Math.PI * 0.75) + (5500 / maxRPM) * (Math.PI * 1.5);
+    tacCtx.beginPath();
+    tacCtx.arc(centroX, centroY, radio - 10, angVerdeInicio, angVerdeFin);
+    tacCtx.strokeStyle = "#4CAF50";
+    tacCtx.lineWidth = 8;
+    tacCtx.stroke();
+
+    // Zona roja (7000–8500)
+    const angRojoInicio = (Math.PI * 0.75) + (7000 / maxRPM) * (Math.PI * 1.5);
+    const angRojoFin = (Math.PI * 0.75) + (8500 / maxRPM) * (Math.PI * 1.5);
+    tacCtx.beginPath();
+    tacCtx.arc(centroX, centroY, radio - 10, angRojoInicio, angRojoFin);
+    tacCtx.strokeStyle = "#f44336";
+    tacCtx.lineWidth = 8;
+    tacCtx.stroke();
+
+    // Aguja
+	let angulo = (Math.PI * 0.75) + (Math.min(rpm, maxRPM) / maxRPM) * (Math.PI * 1.5);
+
+    if (angulo > (Math.PI * 2.25)) angulo = (Math.PI * 2.25);
+    tacCtx.beginPath();
+    tacCtx.moveTo(centroX, centroY);
+    tacCtx.lineTo(
+      centroX + Math.cos(angulo) * (radio - 20),
+      centroY + Math.sin(angulo) * (radio - 20)
+    );
+    tacCtx.strokeStyle = "#ff0000";
+    tacCtx.lineWidth = 4;
+    tacCtx.stroke();
+
+    // Centro aguja
+    tacCtx.beginPath();
+    tacCtx.arc(centroX, centroY, 7, 0, 2 * Math.PI);
+    tacCtx.fillStyle = "#000";
+    tacCtx.fill();
+    tacCtx.strokeStyle = "#ff0000";
+    tacCtx.lineWidth = 2;
+    tacCtx.stroke();
+}
+
+function drawTacometroNitro(ctx, nitro, maxNitro = 100) {
+  ctx.clearRect(0, 0, 200, 200);
+  
+  // Fondo circular
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(100, 100, 90, 0, 2 * Math.PI);
+  ctx.fill();
+
+  // Texto Nitro
+  ctx.fillStyle = "cyan";
+  ctx.font = "bold 20px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("N2O", 100, 50);
+  ctx.fillText(`${Math.round(nitro)}%`, 100, 120);
+
+  // Barra de progreso (cyan)
+  let angle = (nitro / maxNitro) * Math.PI * 1.5 + Math.PI * 0.75;
+  
+  ctx.beginPath();
+  ctx.strokeStyle = "cyan";
+  ctx.lineWidth = 10;
+  ctx.arc(100, 100, 70, Math.PI * 0.75, angle);
+  ctx.stroke();
+}
+
+function drawTacometroVelocidad(ctx, speed, maxSpeed = 300) {
+  ctx.clearRect(0, 0, 200, 200);
+  
+  // Fondo circular
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(100, 100, 90, 0, 2 * Math.PI);
+  ctx.fill();
+
+  // Texto Velocidad
+  ctx.fillStyle = "lime";
+  ctx.font = "bold 28px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("", 100, 50);
+  ctx.fillText(`${Math.round(speed)} km/h`, 100, 120);
+
+  // Barra de progreso (verde)
+  let angle = (speed / maxSpeed) * Math.PI * 1.5 + Math.PI * 0.75;
+  
+  ctx.beginPath();
+  ctx.strokeStyle = "lime";
+  ctx.lineWidth = 10;
+  ctx.arc(100, 100, 70, Math.PI * 0.75, angle);
+  ctx.stroke();
+}
+
+function updateTacometros(nitroValue, speedValue) {
+  drawTacometroNitro(ctxNitro, nitroValue);
+
+  drawTacometroVelocidad(ctxVel, speedValue);
+}
+// Variables auxiliares para UI
+const redline = civicConfig.redline;
+
+requestAnimationFrame(gameLoop);
+reset();
+</script>
+</body>
+</html>
